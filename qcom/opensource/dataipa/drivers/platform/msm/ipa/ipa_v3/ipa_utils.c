@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ *
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
@@ -10795,9 +10796,6 @@ static void ipa3_tag_free_skb(void *user1, int user2)
 }
 
 #define REQUIRED_TAG_PROCESS_DESCRIPTORS 4
-#define MAX_RETRY_ALLOC 10
-#define ALLOC_MIN_SLEEP_RX 100000
-#define ALLOC_MAX_SLEEP_RX 200000
 
 /* ipa3_tag_process() - Initiates a tag process. Incorporates the input
  * descriptors
@@ -10832,6 +10830,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	int req_num_tag_desc = REQUIRED_TAG_PROCESS_DESCRIPTORS;
 	struct ipa_mem_buffer cmd;
 	u32 offset = 0;
+	uint8_t retry_count = 0;
 
 	memset(&cmd, 0, sizeof(struct ipa_mem_buffer));
 	/**
@@ -10858,7 +10857,12 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	}
 	sys = ipa3_ctx->ep[ep_idx].sys;
 
-	tag_desc = kzalloc(sizeof(*tag_desc) * IPA_TAG_MAX_DESC, GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		tag_desc = kzalloc(sizeof(*tag_desc) * IPA_TAG_MAX_DESC, GFP_KERNEL);
+		if (tag_desc)
+			break;
+		usleep_range(ALLOC_MIN_SLEEP_RX, ALLOC_MAX_SLEEP_RX);
+	}
 	if (!tag_desc) {
 		IPAERR("failed to allocate memory\n");
 		return -ENOMEM;
@@ -10899,7 +10903,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 			&reg_write_coal_close, false);
 		if (!cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
-			res = -ENOMEM;
+			res = -EINVAL;
 			goto fail_free_tag_desc;
 		}
 		ipa3_init_imm_cmd_desc(&tag_desc[desc_idx], cmd_pyld);
@@ -10910,8 +10914,13 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	if (ipa3_ctx->ulso_wa) {
 		/* dummary regsiter read IC with HPS clear*/
 		cmd.size = 4;
-		cmd.base = dma_alloc_coherent(ipa3_ctx->pdev, cmd.size,
-			&cmd.phys_base, GFP_KERNEL);
+		for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+			cmd.base = dma_alloc_coherent(ipa3_ctx->pdev, cmd.size,
+				&cmd.phys_base, GFP_KERNEL);
+			if (cmd.base)
+				break;
+			usleep_range(ALLOC_MIN_SLEEP_RX, ALLOC_MAX_SLEEP_RX);
+		}
 		if (cmd.base == NULL) {
 			res = -ENOMEM;
 			goto fail_free_desc;
@@ -10927,7 +10936,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 			&dummy_reg_read, false);
 		if (!cmd_pyld) {
 			IPAERR("failed to construct DUMMY READ IC\n");
-			res = -ENOMEM;
+			res = -EINVAL;
 			goto fail_free_desc;
 		}
 		ipa3_init_imm_cmd_desc(&tag_desc[desc_idx], cmd_pyld);
@@ -10959,7 +10968,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 		IPA_IMM_CMD_IP_PACKET_INIT, &pktinit_cmd, false);
 	if (!cmd_pyld) {
 		IPAERR("failed to construct ip_packet_init imm cmd\n");
-		res = -ENOMEM;
+		res = -EINVAL;
 		goto fail_free_desc;
 	}
 	ipa3_init_imm_cmd_desc(&tag_desc[desc_idx], cmd_pyld);
@@ -10973,7 +10982,7 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 		IPA_IMM_CMD_IP_PACKET_TAG_STATUS, &status, false);
 	if (!cmd_pyld) {
 		IPAERR("failed to construct ip_packet_tag_status imm cmd\n");
-		res = -ENOMEM;
+		res = -EINVAL;
 		goto fail_free_desc;
 	}
 	ipa3_init_imm_cmd_desc(&tag_desc[desc_idx], cmd_pyld);
@@ -10981,7 +10990,12 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	tag_desc[desc_idx].user1 = cmd_pyld;
 	++desc_idx;
 
-	comp = kzalloc(sizeof(*comp), GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		comp = kzalloc(sizeof(*comp), GFP_KERNEL);
+		if (comp)
+			break;
+		usleep_range(ALLOC_MIN_SLEEP_RX, ALLOC_MAX_SLEEP_RX);
+	}
 	if (!comp) {
 		IPAERR("no mem\n");
 		res = -ENOMEM;
@@ -10993,7 +11007,12 @@ int ipa3_tag_process(struct ipa3_desc desc[],
 	atomic_set(&comp->cnt, 2);
 
 	/* dummy packet to send to IPA. packet payload is a completion object */
-	dummy_skb = alloc_skb(sizeof(comp), GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		dummy_skb = alloc_skb(sizeof(comp), GFP_KERNEL);
+		if (dummy_skb)
+			break;
+		usleep_range(ALLOC_MIN_SLEEP_RX, ALLOC_MAX_SLEEP_RX);
+	}
 	if (!dummy_skb) {
 		IPAERR("failed to allocate memory\n");
 		res = -ENOMEM;
