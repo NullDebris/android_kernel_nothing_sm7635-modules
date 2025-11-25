@@ -1,12 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __SMCI_OPENER_H
 #define __SMCI_OPENER_H
 
-#include <linux/smci_object.h>
+#include "smci_object.h"
+#include "IOpener.h"
+
 
 /** 0 is not a valid service ID. */
 #define SMCI_OPENER_INVALID_ID UINT32_C(0)
@@ -20,29 +22,19 @@
 static inline int32_t
 smci_opener_release(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RELEASE, 0, 0);
+	return IOpener_release(self);
 }
 
 static inline int32_t
 smci_opener_retain(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RETAIN, 0, 0);
+	return IOpener_retain(self);
 }
 
 static inline int32_t
 smci_opener_open(struct smci_object self, uint32_t id_val, struct smci_object *obj_ptr)
 {
-	int32_t result;
-	union smci_object_arg a[2];
-
-	a[0].b = (struct smci_object_buf) { &id_val, sizeof(uint32_t) };
-
-	result = smci_object_invoke(self, SMCI_OPENER_OP_OPEN, a,
-			SMCI_OBJECT_COUNTS_PACK(1, 0, 0, 1));
-
-	*obj_ptr = a[1].o;
-
-	return result;
+	return IOpener_open(self, id_val, obj_ptr);
 }
 
 #endif /* __SMCI_OPENER_H */

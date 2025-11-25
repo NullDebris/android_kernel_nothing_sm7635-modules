@@ -1,12 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __SMCI_APPLOADER_H
 #define __SMCI_APPLOADER_H
 
-#include <linux/smci_object.h>
+#include "smci_object.h"
+#include "smci_appcontroller.h"
+#include "IAppLoader.h"
 
 #define SMCI_APPLOADER_ERROR_INVALID_BUFFER INT32_C(10)
 #define SMCI_APPLOADER_ERROR_PIL_ROLLBACK_FAILURE INT32_C(11)
@@ -33,81 +35,45 @@
 static inline int32_t
 smci_apploader_release(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RELEASE, 0, 0);
+	return IAppLoader_release(self);
 }
 
 static inline int32_t
 smci_apploader_retain(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RETAIN, 0, 0);
+	return IAppLoader_retain(self);
 }
 
 static inline int32_t
 smci_apploader_loadfrombuffer(struct smci_object self, const void *appelf_ptr, size_t appelf_len,
 		struct smci_object *appcontroller_ptr)
 {
-	union smci_object_arg a[2];
-	int32_t result;
-
-	a[0].bi = (struct smci_object_buf_in) { appelf_ptr, appelf_len * 1 };
-
-	result = smci_object_invoke(self, SMCI_APPLOADER_OP_LOADFROMBUFFER, a,
-			SMCI_OBJECT_COUNTS_PACK(1, 0, 0, 1));
-
-	*appcontroller_ptr = a[1].o;
-
-	return result;
+	return IAppLoader_loadFromBuffer(self, appelf_ptr, appelf_len,
+		appcontroller_ptr);
 }
 
 static inline int32_t
 smci_apploader_loadfromregion(struct smci_object self, struct smci_object appelf_val,
 		struct smci_object *appcontroller_ptr)
 {
-	union smci_object_arg a[2];
-	int32_t result;
-
-	a[0].o = appelf_val;
-
-	result = smci_object_invoke(self, SMCI_APPLOADER_OP_LOADFROMREGION, a,
-		SMCI_OBJECT_COUNTS_PACK(0, 0, 1, 1));
-
-	*appcontroller_ptr = a[1].o;
-
-	return result;
+	return IAppLoader_loadFromRegion(self, appelf_val,
+		appcontroller_ptr);
 }
 
 static inline int32_t
 smci_apploader_loadembedded(struct smci_object self, const void *appname_ptr, size_t appname_len,
 		struct smci_object *appcontroller_ptr)
 {
-	union smci_object_arg a[2];
-	int32_t result;
-
-	a[0].bi = (struct smci_object_buf_in) { appname_ptr, appname_len * 1 };
-
-	result = smci_object_invoke(self, SMCI_APPLOADER_OP_LOADEMBEDDED, a,
-			SMCI_OBJECT_COUNTS_PACK(1, 0, 0, 1));
-
-	*appcontroller_ptr = a[1].o;
-
-	return result;
+	return IAppLoader_loadEmbedded(self, appname_ptr, appname_len,
+		appcontroller_ptr);
 }
 
 static inline int32_t
 smci_apploader_connect(struct smci_object self, const void *appname_ptr, size_t appname_len,
 		struct smci_object *appcontroller_ptr)
 {
-	union smci_object_arg a[2];
-	int32_t result;
-
-	a[0].bi = (struct smci_object_buf_in) { appname_ptr, appname_len * 1 };
-
-	result = smci_object_invoke(self, SMCI_APPLOADER_OP_CONNECT, a,
-			SMCI_OBJECT_COUNTS_PACK(1, 0, 0, 1));
-
-	*appcontroller_ptr = a[1].o;
-
-	return result;
+	return IAppLoader_connect(self, appname_ptr, appname_len,
+		appcontroller_ptr);
 }
 
 #endif /* __SMCI_APPLOADER_H */

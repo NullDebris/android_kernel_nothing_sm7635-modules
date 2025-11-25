@@ -1,12 +1,13 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __SMCI_APPCLIENT_H
 #define __SMCI_APPCLIENT_H
 
-#include <linux/smci_object.h>
+#include "smci_object.h"
+#include "IAppClient.h"
 
 #define SMCI_APPCLIENT_ERROR_APP_NOT_FOUND INT32_C(10)
 #define SMCI_APPCLIENT_ERROR_APP_RESTART_FAILED INT32_C(11)
@@ -20,30 +21,21 @@
 static inline int32_t
 smci_appclient_release(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RELEASE, 0, 0);
+	return IAppClient_release(self);
 }
 
 static inline int32_t
 smci_appclient_retain(struct smci_object self)
 {
-	return smci_object_invoke(self, SMCI_OBJECT_OP_RETAIN, 0, 0);
+	return IAppClient_retain(self);
 }
 
 static inline int32_t
 smci_appclient_getappobject(struct smci_object self, const void *app_dist_name_ptr,
 			size_t app_dist_name_len, struct smci_object *obj_ptr)
 {
-	int32_t result;
-	union smci_object_arg a[2];
-
-	a[0].bi = (struct smci_object_buf_in) { app_dist_name_ptr, app_dist_name_len * 1 };
-
-	result = smci_object_invoke(self, SMCI_APPCLIENT_OP_GETAPPOBJECT, a,
-			SMCI_OBJECT_COUNTS_PACK(1, 0, 0, 1));
-
-	*obj_ptr = a[1].o;
-
-	return result;
+	return IAppClient_getAppObject(self, app_dist_name_ptr,
+		app_dist_name_len, obj_ptr);
 }
 
 #endif /* __SMCI_APPCLIENT_H */
