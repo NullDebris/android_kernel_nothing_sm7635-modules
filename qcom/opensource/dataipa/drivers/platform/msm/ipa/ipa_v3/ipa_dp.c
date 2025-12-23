@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ *
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include <linux/ip.h>
@@ -622,13 +623,9 @@ int ipa3_send(struct ipa3_sys_context *sys,
 	int i = 0;
 	int j;
 	int result;
-	u32 mem_flag = GFP_ATOMIC;
 	const struct ipa_gsi_ep_config *gsi_ep_cfg;
 	bool send_nop = false;
 	unsigned int max_desc;
-
-	if (unlikely(!in_atomic))
-		mem_flag = GFP_KERNEL;
 
 	gsi_ep_cfg = ipa_get_gsi_ep_info(sys->ep->client);
 	if (unlikely(!gsi_ep_cfg)) {
@@ -2352,6 +2349,7 @@ int ipa_tx_dp(enum ipa_client_type dst, struct sk_buff *skb,
 	int data_idx;
 	unsigned int max_desc;
 	enum ipa_client_type type;
+	const char *devname = "";
 
 	if (unlikely(!ipa3_ctx)) {
 		IPAERR("IPA3 driver was not initialized\n");
@@ -2405,7 +2403,10 @@ int ipa_tx_dp(enum ipa_client_type dst, struct sk_buff *skb,
 		goto fail_pipe_not_valid;
 	}
 
-	trace_ipa_tx_dp(skb,sys->ep->client);
+	if (skb && skb->dev)
+		devname = skb->dev->name;
+
+	trace_ipa_tx_dp(skb, devname, sys->ep->client);
 	num_frags = skb_shinfo(skb)->nr_frags;
 	/*
 	 * make sure TLV FIFO supports the needed frags.
@@ -3912,6 +3913,7 @@ static int ipa3_lan_rx_pyld_hdlr(struct sk_buff *skb,
 	struct ipa3_tx_pkt_wrapper *tx_pkt = NULL;
 	unsigned long ptr;
 	enum ipa_client_type type;
+	const char *devname = "";
 
 	IPA_DUMP_BUFF(skb->data, 0, skb->len);
 
@@ -4014,7 +4016,11 @@ begin:
 			atomic_set(&ipa3_ctx->is_suspend_mode_enabled, 0);
 			type = ipa3_get_client_by_pipe(status.endp_src_idx);
 			IPAERR("Client %s woke up the system\n", ipa_clients_strings[type]);
-			trace_ipa_tx_dp(skb, sys->ep->client);
+
+			if (skb && skb->dev)
+				devname = skb->dev->name;
+
+			trace_ipa_tx_dp(skb, devname, sys->ep->client);
 		}
 		if (sys->status_stat) {
 			sys->status_stat->status[sys->status_stat->curr] =

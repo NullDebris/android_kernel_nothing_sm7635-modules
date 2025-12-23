@@ -527,21 +527,8 @@ EXPORT_SYMBOL(ipa_smmu_free_sgt);
 
 static int ipa_pm_notify(struct notifier_block *b, unsigned long event, void *p)
 {
-	int i;
 	IPADBG("Entry\n");
 	switch (event) {
-	case PM_SUSPEND_PREPARE:
-		/* In case there is a tx/rx handler in polling mode fail to suspend */
-		for (i = 0; i < ipa3_ctx->ipa_num_pipes; i++) {
-			if (ipa3_ctx->ep[i].sys &&
-					atomic_read(&ipa3_ctx->ep[i].sys->curr_polling_state)) {
-				IPAERR("EP %d is in polling state, do not suspend\n", i);
-				return -EAGAIN;
-			}
-		}
-		ipa_pm_deactivate_all_deferred();
-		atomic_set(&ipa3_ctx->is_suspend_mode_enabled, 1);
-		break;
 	case PM_POST_SUSPEND:
 #if IS_ENABLED(CONFIG_DEEPSLEEP)
 		if (ipa3_ctx->deepsleep) {
@@ -879,7 +866,7 @@ static int ipa3_active_clients_log_insert(const char *string)
 
 	memset(ipa3_ctx->ipa3_active_clients_logging.log_buffer[head], '_',
 			IPA3_ACTIVE_CLIENTS_LOG_LINE_LEN);
-	strlcpy(ipa3_ctx->ipa3_active_clients_logging.log_buffer[head], string,
+	strscpy(ipa3_ctx->ipa3_active_clients_logging.log_buffer[head], string,
 			(size_t)IPA3_ACTIVE_CLIENTS_LOG_LINE_LEN);
 	head = (head + 1) % IPA3_ACTIVE_CLIENTS_LOG_BUFFER_SIZE_LINES;
 	if (tail == head)
@@ -4514,7 +4501,7 @@ int ipa3_setup_dflt_rt_tables(void)
 	rt_rule->num_rules = 1;
 	rt_rule->commit = 1;
 	rt_rule->ip = IPA_IP_v4;
-	strlcpy(rt_rule->rt_tbl_name, IPA_DFLT_RT_TBL_NAME,
+	strscpy(rt_rule->rt_tbl_name, IPA_DFLT_RT_TBL_NAME,
 		IPA_RESOURCE_NAME_MAX);
 
 	rt_rule_entry = &rt_rule->rules[0];
@@ -4573,7 +4560,7 @@ static int ipa3_setup_exception_path(void)
 		hdr->commit = 1;
 		hdr_entry = &hdr->hdr[0];
 
-		strlcpy(hdr_entry->name, IPA_LAN_RX_HDR_NAME, IPA_RESOURCE_NAME_MAX);
+		strscpy(hdr_entry->name, IPA_LAN_RX_HDR_NAME, IPA_RESOURCE_NAME_MAX);
 		hdr_entry->hdr_len = IPA_LAN_RX_HEADER_LENGTH;
 
 		if (ipa_add_hdr(hdr)) {
@@ -4904,6 +4891,8 @@ static int ipa3_q6_clean_q6_flt_tbls(enum ipa_ip_type ip,
 	struct ipahal_reg_valmask valmask;
 	struct ipahal_imm_cmd_register_write reg_write_coal_close;
 	int coal_ep = IPA_EP_NOT_ALLOCATED;
+	gfp_t mem_flag;
+	uint8_t retry_count = 0;
 
 	IPADBG("Entry\n");
 
@@ -4921,14 +4910,30 @@ static int ipa3_q6_clean_q6_flt_tbls(enum ipa_ip_type ip,
 		return retval;
 	}
 
-	/* Up to filtering pipes we have filtering tables + 1 for coal close */
-	desc = kcalloc(ipa3_ctx->ep_flt_num + 1, sizeof(struct ipa3_desc),
-		GFP_KERNEL);
+	if (in_atomic()) {
+		mem_flag = GFP_ATOMIC;
+		ipa3_ctx->stats.ssr_mem_alloc_atomic++;
+	} else {
+		mem_flag = GFP_KERNEL;
+		ipa3_ctx->stats.ssr_mem_alloc_non_atomic++;
+	}
+
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		/* Up to filtering pipes we have filtering tables + 1 for coal close */
+		desc = kcalloc(ipa3_ctx->ep_flt_num + 1, sizeof(struct ipa3_desc),
+			mem_flag);
+		if (desc)
+			break;
+	}
 	if (!desc)
 		return -ENOMEM;
 
-	cmd_pyld = kcalloc(ipa3_ctx->ep_flt_num + 1,
-		sizeof(struct ipahal_imm_cmd_pyld *), GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		cmd_pyld = kcalloc(ipa3_ctx->ep_flt_num + 1,
+			sizeof(struct ipahal_imm_cmd_pyld *), mem_flag);
+		if (cmd_pyld)
+			break;
+	}
 	if (!cmd_pyld) {
 		retval = -ENOMEM;
 		goto free_desc;
@@ -4953,7 +4958,7 @@ static int ipa3_q6_clean_q6_flt_tbls(enum ipa_ip_type ip,
 	}
 
 	retval = ipahal_flt_generate_empty_img(1, lcl_hdr_sz, lcl_hdr_sz,
-		0, &mem, true);
+		0, &mem, (mem_flag == GFP_ATOMIC) ? true : false);
 	if (retval) {
 		IPAERR("failed to generate flt single tbl empty img\n");
 		goto free_cmd_pyld;
@@ -4981,7 +4986,7 @@ static int ipa3_q6_clean_q6_flt_tbls(enum ipa_ip_type ip,
 			&reg_write_coal_close, false);
 		if (!cmd_pyld[num_cmds]) {
 			IPAERR("failed to construct coal close IC\n");
-			retval = -ENOMEM;
+			retval = -EINVAL;
 			goto free_empty_img;
 		}
 		ipa3_init_imm_cmd_desc(&desc[num_cmds], cmd_pyld[num_cmds]);
@@ -5024,7 +5029,7 @@ static int ipa3_q6_clean_q6_flt_tbls(enum ipa_ip_type ip,
 				IPA_IMM_CMD_DMA_SHARED_MEM, &cmd, false);
 			if (!cmd_pyld[num_cmds]) {
 				IPAERR("fail construct dma_shared_mem cmd\n");
-				retval = -ENOMEM;
+				retval = -EINVAL;
 				goto free_empty_img;
 			}
 			ipa3_init_imm_cmd_desc(&desc[num_cmds],
@@ -5069,6 +5074,8 @@ static int ipa3_q6_clean_q6_rt_tbls(enum ipa_ip_type ip,
 	struct ipahal_reg_valmask valmask;
 	struct ipahal_imm_cmd_register_write reg_write_coal_close;
 	int i;
+	gfp_t mem_flag;
+	uint8_t retry_count = 0;
 
 	IPADBG("Entry\n");
 
@@ -5108,21 +5115,37 @@ static int ipa3_q6_clean_q6_rt_tbls(enum ipa_ip_type ip,
 		}
 	}
 
+	if (in_atomic()) {
+		mem_flag = GFP_ATOMIC;
+		ipa3_ctx->stats.ssr_mem_alloc_atomic++;
+	} else {
+		mem_flag = GFP_KERNEL;
+		ipa3_ctx->stats.ssr_mem_alloc_non_atomic++;
+	}
+
 	retval = ipahal_rt_generate_empty_img(
 		modem_rt_index_hi - modem_rt_index_lo + 1,
-		lcl_hdr_sz, lcl_hdr_sz, &mem, true);
+		lcl_hdr_sz, lcl_hdr_sz, &mem, (mem_flag == GFP_ATOMIC) ? true : false);
 	if (retval) {
 		IPAERR("fail generate empty rt img\n");
 		return -ENOMEM;
 	}
 
-	desc = kcalloc(2, sizeof(struct ipa3_desc), GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		desc = kcalloc(2, sizeof(struct ipa3_desc), mem_flag);
+		if (desc)
+			break;
+	}
 	if (!desc) {
 		retval = -ENOMEM;
 		goto free_empty_img;
 	}
 
-	cmd_pyld = kcalloc(2, sizeof(struct ipahal_imm_cmd_pyld *), GFP_KERNEL);
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		cmd_pyld = kcalloc(2, sizeof(struct ipahal_imm_cmd_pyld *), mem_flag);
+		if (cmd_pyld)
+			break;
+	}
 	if (!cmd_pyld) {
 		retval = -ENOMEM;
 		goto free_desc;
@@ -5151,7 +5174,7 @@ static int ipa3_q6_clean_q6_rt_tbls(enum ipa_ip_type ip,
 			&reg_write_coal_close, false);
 		if (!cmd_pyld[num_cmds]) {
 			IPAERR("failed to construct coal close IC\n");
-			retval = -ENOMEM;
+			retval = -EINVAL;
 			goto free_cmd_pyld;
 		}
 		ipa3_init_imm_cmd_desc(&desc[num_cmds], cmd_pyld[num_cmds]);
@@ -5170,7 +5193,7 @@ static int ipa3_q6_clean_q6_rt_tbls(enum ipa_ip_type ip,
 			IPA_IMM_CMD_DMA_SHARED_MEM, &cmd, false);
 	if (!cmd_pyld[num_cmds]) {
 		IPAERR("failed to construct dma_shared_mem imm cmd\n");
-		retval = -ENOMEM;
+		retval = -EINVAL;
 		goto free_cmd_pyld;
 	}
 	ipa3_init_imm_cmd_desc(&desc[num_cmds], cmd_pyld[num_cmds]);
@@ -5354,9 +5377,23 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 	struct ipahal_reg_valmask valmask;
 	struct ipahal_imm_cmd_register_write reg_write_coal_close;
 	int i;
+	gfp_t mem_flag;
+	uint8_t retry_count = 0;
 
-	desc = kcalloc(ipa3_ctx->ipa_num_pipes + 1, sizeof(struct ipa3_desc),
-			GFP_KERNEL);
+	if (in_atomic()) {
+		mem_flag = GFP_ATOMIC;
+		ipa3_ctx->stats.ssr_mem_alloc_atomic++;
+	} else {
+		mem_flag = GFP_KERNEL;
+		ipa3_ctx->stats.ssr_mem_alloc_non_atomic++;
+	}
+
+	for (retry_count = 0; retry_count < MAX_RETRY_ALLOC; retry_count++) {
+		desc = kcalloc(ipa3_ctx->ipa_num_pipes + 1, sizeof(struct ipa3_desc),
+			mem_flag);
+		if (desc)
+			break;
+	}
 	if (!desc)
 		return -ENOMEM;
 
@@ -5384,7 +5421,7 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 		if (!cmd_pyld) {
 			IPAERR("failed to construct coal close IC\n");
 			ipa_assert();
-			return -ENOMEM;
+			return -EINVAL;
 		}
 		ipa3_init_imm_cmd_desc(&desc[num_descs], cmd_pyld);
 		desc[num_descs].callback = ipa3_destroy_imm;
@@ -5422,7 +5459,7 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 			if (!cmd_pyld) {
 				IPAERR("fail construct register_write cmd\n");
 				ipa_assert();
-				return -ENOMEM;
+				return -EINVAL;
 			}
 
 			ipa3_init_imm_cmd_desc(&desc[num_descs], cmd_pyld);
@@ -6909,7 +6946,7 @@ static void ipa3_active_clients_log_mod(
 	int_ctx = true;
 	hfound = NULL;
 	memset(str_to_hash, 0, IPA3_ACTIVE_CLIENTS_LOG_NAME_LEN);
-	strlcpy(str_to_hash, id->id_string, IPA3_ACTIVE_CLIENTS_LOG_NAME_LEN);
+	strscpy(str_to_hash, id->id_string, IPA3_ACTIVE_CLIENTS_LOG_NAME_LEN);
 	hkey = jhash(str_to_hash, IPA3_ACTIVE_CLIENTS_LOG_NAME_LEN,
 			0);
 	hash_for_each_possible(ipa3_ctx->ipa3_active_clients_logging.htable,
@@ -6931,7 +6968,7 @@ static void ipa3_active_clients_log_mod(
 			return;
 		}
 		hentry->type = id->type;
-		strlcpy(hentry->id_string, id->id_string,
+		strscpy(hentry->id_string, id->id_string,
 				IPA3_ACTIVE_CLIENTS_LOG_NAME_LEN);
 		INIT_HLIST_NODE(&hentry->list);
 		hentry->count = inc ? 1 : -1;
@@ -8340,7 +8377,7 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 	/*Adding ipa3_ctx pointer to minidump list*/
 	mini_dump = (struct ipa_minidump_data *)kzalloc(sizeof(struct ipa_minidump_data), GFP_KERNEL);
 	if (mini_dump != NULL) {
-		strlcpy(mini_dump->data.owner, "ipa3_ctx", sizeof(mini_dump->data.owner));
+		strscpy(mini_dump->data.owner, "ipa3_ctx", sizeof(mini_dump->data.owner));
 		mini_dump->data.vaddr = (unsigned long)(ipa3_ctx);
 		mini_dump->data.size = sizeof(struct ipa3_context);
 		list_add(&mini_dump->entry, &ipa3_ctx->minidump_list_head);
