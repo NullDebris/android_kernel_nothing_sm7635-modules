@@ -293,6 +293,7 @@ struct dsi_panel {
 	int last_refresh_rate;
 	bool lhbm_state;
 	bool update_init_gamma;
+	bool needs_gamma_restore;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
