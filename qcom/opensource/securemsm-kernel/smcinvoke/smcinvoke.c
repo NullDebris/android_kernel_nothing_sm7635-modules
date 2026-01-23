@@ -2657,9 +2657,15 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 		 * new cb requests.
 		 */
 		if (!cb_txn) {
-			pr_err_ratelimited("%s txn %llu either invalid or removed from Q\n",
-					__func__, user_args.txn_id);
-			goto start_waiting_for_requests;
+				pr_err_ratelimited(
+						"%s: stale txn %llu detected, suspending server %u\n",
+						__func__, user_args.txn_id, server_info->server_id);
+
+				mutex_lock(&g_smcinvoke_lock);
+				server_info->is_server_suspended = 1;
+				mutex_unlock(&g_smcinvoke_lock);
+
+				return -ENODEV;
 		}
 		ret = marshal_out_tzcb_req(&user_args, cb_txn,
 				cb_txn->filp_to_release);
@@ -2683,7 +2689,6 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 		if (ret && OBJECT_COUNTS_NUM_OO(user_args.counts))
 			goto out;
 	}
-start_waiting_for_requests:
 	/*
 	 * Once response has been delivered, thread will wait for another
 	 * callback req to process.
@@ -3163,7 +3168,7 @@ static int smcinvoke_probe(struct platform_device *pdev)
 	unsigned int count = 1;
 	int rc = 0;
 
-	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(63));
 	if (rc) {
 		pr_err("dma_set_mask_and_coherent failed %d\n", rc);
 		return rc;
