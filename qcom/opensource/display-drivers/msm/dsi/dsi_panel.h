@@ -292,6 +292,7 @@ struct dsi_panel {
 	bool doze_recoverying;
 	int last_refresh_rate;
 	bool lhbm_state;
+	bool lhbm_wait;
 	bool update_init_gamma;
 	bool needs_gamma_restore;
 };
